@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src https://cdn.jsdelivr.net https://storage.googleapis.com; style-src 'unsafe-inline'; img-src data: blob:; media-src blob: mediastream:; worker-src blob:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#05070d">
+<title>GonioCam - camera goniometer</title>
+<style>
+:root{
+  --bg:#05070d;
+  --text:#eaf1fb;
+  --muted:#9fb0c8;
+  --glass:rgba(16,24,40,.58);
+  --glass-strong:rgba(20,30,50,.82);
+  --border:rgba(255,255,255,.10);
+  --accent:#22d3ee;
+  --accent-2:#a78bfa;
+  --accent-contrast:#03252c;
+  --ok:#4ade80;
+  --warn:#fbbf24;
+  --bad:#f87171;
+  --focus:#93c5fd;
+  --radius:18px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  min-height:100dvh;display:flex;flex-direction:column;color:var(--text);background:var(--bg);
+  font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(50rem 30rem at 0% 0%,rgba(34,211,238,.12),transparent 60%),
+             radial-gradient(40rem 30rem at 100% 100%,rgba(167,139,250,.12),transparent 60%)}
+:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+.sr-only{position:absolute!important;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 10px 30px rgba(0,0,0,.35)}
+
+header{display:flex;align-items:center;gap:12px;padding:10px 14px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.1rem;letter-spacing:-.01em}
+.brand-mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#04121a}
+.spacer{flex:1}
+.status{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;font-size:.85rem;font-weight:600;color:var(--muted)}
+.status .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.status[data-state="loading"] .dot{background:var(--warn);animation:pulse 1.2s infinite}
+.status[data-state="live"] .dot{background:var(--ok);box-shadow:0 0 0 0 rgba(74,222,128,.6);animation:ring 2s infinite}
+.status[data-state="error"] .dot{background:var(--bad)}
+@keyframes pulse{50%{opacity:.3}}
+@keyframes ring{0%{box-shadow:0 0 0 0 rgba(74,222,128,.55)}70%{box-shadow:0 0 0 8px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+
+main{flex:1;display:grid;gap:12px;padding:0 12px 12px;align-content:start}
+.stage-wrap{display:flex;justify-content:center}
+.stage{
+  --ar:1.7778;position:relative;overflow:hidden;border-radius:22px;background:#000;border:1px solid var(--border);
+  width:min(100%,calc((100dvh - 250px) * var(--ar)));aspect-ratio:var(--ar);min-height:220px;
+  box-shadow:0 20px 50px rgba(0,0,0,.5);
+}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.stage video{object-fit:fill}
+.stage video.mirrored{transform:scaleX(-1)}
+
+.hud{position:absolute;left:12px;top:12px;padding:12px 16px;min-width:170px;pointer-events:none;animation:fadeIn .4s ease both}
+.hud-metric{font-size:.78rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.hud-value{font-size:clamp(2.4rem,8vw,4.2rem);font-weight:800;line-height:1.05;letter-spacing:-.03em;font-variant-numeric:tabular-nums;color:var(--text)}
+.hud-value .deg{color:var(--accent)}
+.hud-value.gated{font-size:clamp(1.05rem,3.2vw,1.4rem);line-height:1.3;padding:6px 0;color:var(--warn);letter-spacing:0}
+.hud-sub{font-size:.8rem;color:var(--muted)}
+
+.hint{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;font-size:.88rem;font-weight:600;width:max-content;max-width:calc(100% - 24px);line-height:1.3;pointer-events:none}
+@media (max-width:520px){.hint{font-size:.78rem;padding:6px 12px;bottom:8px}}
+.hint svg{flex:none;width:18px;height:18px;color:var(--accent)}
+
+.overlay{position:absolute;inset:0;display:grid;place-items:center;padding:20px;background:rgba(5,7,13,.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:fadeIn .3s ease both}
+.overlay[hidden]{display:none}
+.overlay-card{max-width:420px;text-align:center;padding:24px;display:grid;gap:12px;justify-items:center}
+.overlay-card h2{margin:0;font-size:1.25rem}
+.overlay-card p{margin:0;color:var(--muted)}
+.overlay-card .icon{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:rgba(34,211,238,.12);color:var(--accent)}
+.overlay-card .icon.err{background:rgba(248,113,113,.14);color:var(--bad)}
+.overlay-card .icon svg{width:28px;height:28px}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.btn{
+  min-height:52px;padding:12px 22px;border-radius:14px;border:1px solid var(--border);font:inherit;font-weight:700;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;color:var(--text);background:var(--glass-strong);
+  transition:transform .15s ease,background-color .2s,border-color .2s;
+}
+.btn svg{width:20px;height:20px}
+.btn:hover{border-color:rgba(34,211,238,.5)}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#38bdf8);color:var(--accent-contrast);border-color:transparent;box-shadow:0 8px 24px rgba(34,211,238,.3)}
+.btn[hidden]{display:none}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+.controls{padding:14px;display:grid;gap:14px}
+.ctl{display:grid;gap:8px;margin:0;padding:0;border:0;min-inline-size:0}
+.ctl legend,.ctl-label{padding:0;margin-bottom:8px;font-size:.78rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.seg{display:flex;flex-wrap:wrap;gap:8px}
+.seg label{position:relative;flex:1 1 auto}
+.seg input{position:absolute;opacity:0;width:1px;height:1px}
+.seg span{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:52px;min-width:72px;padding:8px 14px;border-radius:14px;
+  border:1px solid var(--border);background:var(--glass-strong);font-weight:700;cursor:pointer;transition:all .2s ease;text-align:center;
+}
+.seg span small{font-weight:500;font-size:.7rem;color:var(--muted)}
+.seg input:checked + span{background:rgba(34,211,238,.16);border-color:var(--accent);color:var(--text);box-shadow:inset 0 0 0 1px var(--accent)}
+.seg input:focus-visible + span{outline:3px solid var(--focus);outline-offset:2px}
+.seg input:disabled + span{opacity:.45;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.row .btn{flex:1 1 auto}
+
+footer{padding:6px 16px 14px;text-align:center;color:var(--muted);font-size:.82rem}
+
+@media (min-width:900px) and (orientation:landscape){
+  main{grid-template-columns:minmax(0,1fr) 300px;align-items:start}
+  .stage{width:min(100%,calc((100dvh - 140px) * var(--ar)))}
+  .controls{position:sticky;top:12px}
+}
+@media (max-width:899px), (orientation:portrait){
+  .stage{width:min(100%,calc((100dvh - 330px) * var(--ar)))}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 L12 6 L20 20"/><path d="M8.5 13.5a5 5 0 0 0 7 0"/></svg>
+    </span>
+    GonioCam
+  </div>
+  <span class="spacer"></span>
+  <span class="status glass" id="status" data-state="loading" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="statusText">Loading pose model…</span></span>
+</header>
+
+<main>
+  <div class="stage-wrap">
+    <div class="stage" id="stage">
+      <video id="video" playsinline muted autoplay aria-hidden="true"></video>
+      <canvas id="overlay" aria-hidden="true"></canvas>
+
+      <div class="hud glass" id="hud" hidden>
+        <div class="hud-metric" id="hudMetric">Knee flexion · Left</div>
+        <div class="hud-value" id="hudValue" aria-live="off">--</div>
+        <div class="hud-sub" id="hudSub">Smoothed · 2D</div>
+      </div>
+
+      <div class="hint glass" id="hint" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg>
+        Film perpendicular to the plane of movement.
+      </div>
+
+      <div class="overlay" id="startOverlay">
+        <div class="overlay-card glass">
+          <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+          <h2>Measure joint angles with your camera</h2>
+          <p>Video is processed on this device. Nothing is uploaded or stored.</p>
+          <button type="button" class="btn btn-primary" id="startBtn">Start camera</button>
+        </div>
+      </div>
+
+      <div class="overlay" id="errorOverlay" hidden>
+        <div class="overlay-card glass" role="alert">
+          <div class="icon err" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div>
+          <h2 id="errorTitle">Camera unavailable</h2>
+          <p id="errorText"></p>
+          <button type="button" class="btn btn-primary" id="retryBtn">Try again</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="controls glass" aria-label="Measurement controls">
+    <fieldset class="ctl">
+      <legend>Joint</legend>
+      <div class="seg" id="jointSeg"></div>
+    </fieldset>
+    <fieldset class="ctl">
+      <legend>Side</legend>
+      <div class="seg">
+        <label><input type="radio" name="side" value="left" checked><span>Left</span></label>
+        <label><input type="radio" name="side" value="right"><span>Right</span></label>
+      </div>
+    </fieldset>
+    <div class="ctl">
+      <div class="ctl-label" id="camLabel">Camera</div>
+      <div class="row" role="group" aria-labelledby="camLabel">
+        <button type="button" class="btn" id="flipBtn" hidden aria-label="Switch between front and rear camera">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-3l-2-3H9L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M9 13a3 3 0 0 1 5-2.2M15 13a3 3 0 0 1-5 2.2"/><path d="M14 9v2h-2M10 17v-2h2"/></svg>
+          Flip
+        </button>
+        <button type="button" class="btn" id="mirrorBtn" aria-pressed="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18"/><path d="M8 7 3 12l5 5V7zM16 7l5 5-5 5V7z"/></svg>
+          Mirror
+        </button>
+        <button type="button" class="btn" id="stopBtn" hidden>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          Stop
+        </button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>Screening and demo tool. Not a validated replacement for a universal goniometer.</footer>
+
+<script type="module">
+'use strict';
+
+const LIB_VERSION = '0.10.21';
+const LIB_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${LIB_VERSION}/vision_bundle.mjs`;
+const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${LIB_VERSION}/wasm`;
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
+const VIS_MIN = 0.5;
+
+/* MediaPipe Pose landmark indices */
+const LM = {
+  leftShoulder: 11, rightShoulder: 12, leftElbow: 13, rightElbow: 14, leftWrist: 15, rightWrist: 16,
+  leftHip: 23, rightHip: 24, leftKnee: 25, rightKnee: 26, leftAnkle: 27, rightAnkle: 28,
+  leftFootIndex: 31, rightFootIndex: 32
+};
+
+/* Joint definitions: [proximal, vertex, distal]. mode 'flexion' reports 180 - interior. */
+const JOINTS = [
+  { id: 'knee', name: 'Knee', metric: 'Knee flexion', mode: 'flexion', enabled: true,
+    points: { left: [LM.leftHip, LM.leftKnee, LM.leftAnkle], right: [LM.rightHip, LM.rightKnee, LM.rightAnkle] } },
+  { id: 'elbow', name: 'Elbow', enabled: false },
+  { id: 'hip', name: 'Hip', enabled: false },
+  { id: 'shoulder', name: 'Shoulder', enabled: false },
+  { id: 'ankle', name: 'Ankle', enabled: false }
+];
+
+/* ---------- One Euro filter (Casiez et al., 2012) ---------- */
+class LowPass {
+  constructor() { this.y = null; }
+  filter(x, a) { this.y = this.y == null ? x : a * x + (1 - a) * this.y; return this.y; }
+}
+class OneEuro {
+  constructor(minCutoff = 1.0, beta = 0.05, dCutoff = 1.0) {
+    Object.assign(this, { minCutoff, beta, dCutoff });
+    this.reset();
+  }
+  reset() { this.x = new LowPass(); this.dx = new LowPass(); this.t = null; }
+  static alpha(cutoff, dt) { const tau = 1 / (2 * Math.PI * cutoff); return 1 / (1 + tau / dt); }
+  filter(value, tMs) {
+    if (this.t == null) { this.t = tMs; this.dx.filter(0, 1); return this.x.filter(value, 1); }
+    const dt = Math.max(1e-3, (tMs - this.t) / 1000);
+    this.t = tMs;
+    const d = (value - this.x.y) / dt;
+    const ed = this.dx.filter(d, OneEuro.alpha(this.dCutoff, dt));
+    const cutoff = this.minCutoff + this.beta * Math.abs(ed);
+    return this.x.filter(value, OneEuro.alpha(cutoff, dt));
+  }
+}
+
+/* ---------- Geometry ---------- */
+// Interior angle at b, in degrees. Uses x,y only, scaled to pixels so non-square frames don't distort it.
+function interiorAngle(a, b, c, w, h) {
+  const v1x = (a.x - b.x) * w, v1y = (a.y - b.y) * h;
+  const v2x = (c.x - b.x) * w, v2y = (c.y - b.y) * h;
+  const n = Math.hypot(v1x, v1y) * Math.hypot(v2x, v2y);
+  if (!n) return null;
+  const cos = Math.min(1, Math.max(-1, (v1x * v2x + v1y * v2y) / n));
+  return Math.acos(cos) * 180 / Math.PI;
+}
+
+/* ---------- DOM ---------- */
+const $ = id => document.getElementById(id);
+const video = $('video'), canvas = $('overlay'), ctx = canvas.getContext('2d');
+const stage = $('stage');
+const hud = $('hud'), hudMetric = $('hudMetric'), hudValue = $('hudValue'), hudSub = $('hudSub');
+const statusEl = $('status'), statusText = $('statusText');
+
+const state = {
+  joint: JOINTS[0], side: 'left', facing: 'user', mirror: true,
+  stream: null, landmarker: null, delegate: null, vision: null, fileset: null,
+  running: false, raf: 0, lastVideoTime: -1, filter: new OneEuro(), gate: ''
+};
+
+function setStatus(kind, text) { statusEl.dataset.state = kind; statusText.textContent = text; }
+
+// Joint selector built from JOINTS
+$('jointSeg').append(...JOINTS.map(j => {
+  const label = document.createElement('label');
+  label.innerHTML = `<input type="radio" name="joint" value="${j.id}"><span>${j.name}${j.enabled ? '' : '<small>Step 2</small>'}</span>`;
+  const input = label.querySelector('input');
+  input.checked = j === state.joint;
+  input.disabled = !j.enabled;
+  input.addEventListener('change', () => { state.joint = j; onSelectionChange(); });
+  return label;
+}));
+document.querySelectorAll('input[name=side]').forEach(r => r.addEventListener('change', e => {
+  state.side = e.target.value; onSelectionChange();
+}));
+function onSelectionChange() {
+  state.filter.reset();
+  hudMetric.textContent = `${state.joint.metric} · ${state.side === 'left' ? 'Left' : 'Right'}`;
+}
+onSelectionChange();
+
+/* ---------- Model ---------- */
+async function createLandmarker(delegate) {
+  return state.vision.PoseLandmarker.createFromOptions(state.fileset, {
+    baseOptions: { modelAssetPath: MODEL_URL, delegate },
+    runningMode: 'VIDEO',
+    numPoses: 1,
+    minPoseDetectionConfidence: 0.5,
+    minPosePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+}
+
+async function loadModel() {
+  setStatus('loading', 'Loading pose model…');
+  try {
+    state.vision = await import(LIB_URL);
+    state.fileset = await state.vision.FilesetResolver.forVisionTasks(WASM_URL);
+  } catch (e) {
+    console.error(e);
+    setStatus('error', 'Model failed to load');
+    showError('Pose model could not load', 'Check your internet connection, then try again. The library and model are downloaded once; video never leaves the device.', loadModel);
+    return;
+  }
+  let lastErr;
+  for (const delegate of ['GPU', 'CPU']) {
+    try {
+      state.landmarker = await createLandmarker(delegate);
+      state.delegate = delegate;
+      break;
+    } catch (e) { console.warn(`${delegate} delegate failed`, e); lastErr = e; }
+  }
+  if (!state.landmarker) {
+    console.error(lastErr);
+    setStatus('error', 'Model failed to start');
+    showError('Pose model could not start', 'This browser could not run the pose model on GPU or CPU.', loadModel);
+    return;
+  }
+  hideError();
+  setStatus(state.stream ? 'live' : 'idle', state.stream ? `Live · ${state.delegate}` : `Model ready · ${state.delegate}`);
+}
+
+async function fallbackToCpu(err) {
+  console.warn('GPU inference failed, switching to CPU', err);
+  try { state.landmarker && state.landmarker.close(); } catch (e) { /* ignore */ }
+  state.landmarker = null;
+  try {
+    state.landmarker = await createLandmarker('CPU');
+    state.delegate = 'CPU';
+    setStatus('live', 'Live · CPU');
+  } catch (e) {
+    setStatus('error', 'Model failed');
+    showError('Pose model stopped', 'Pose detection failed on this device.', () => location.reload());
+  }
+}
+
+/* ---------- Camera ---------- */
+function showError(title, text, retry) {
+  $('errorTitle').textContent = title;
+  $('errorText').textContent = text;
+  $('retryBtn').onclick = () => { hideError(); retry(); };
+  $('errorOverlay').hidden = false;
+  $('startOverlay').hidden = true;
+}
+function hideError() { $('errorOverlay').hidden = true; }
+
+function stopCamera() {
+  state.running = false;
+  cancelAnimationFrame(state.raf);
+  if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+  state.stream = null;
+  video.srcObject = null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  hud.hidden = true; $('hint').hidden = true;
+  $('stopBtn').hidden = true;
+  $('startOverlay').hidden = false;
+  if (state.landmarker) setStatus('idle', `Camera off · ${state.delegate}`);
+}
+
+async function startCamera() {
+  hideError();
+  if (!window.isSecureContext) {
+    showError('Secure connection needed', 'Browsers only allow camera access over HTTPS or from localhost. Open GonioCam from an https:// address.', startCamera);
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError('Camera not supported', 'This browser does not support camera access. Try a recent version of Chrome, Safari or Edge.', startCamera);
+    return;
+  }
+  if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+  try {
+    state.stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: state.facing, width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+  } catch (e) {
+    state.stream = null;
+    const name = e && e.name;
+    if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+      showError('Camera permission denied', 'Allow camera access for this page in your browser or device settings (on iPhone/iPad: Settings › Safari › Camera), then try again.', startCamera);
+    } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+      showError('No camera found', 'No usable camera was detected on this device. Connect a camera and try again.', startCamera);
+    } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+      showError('Camera is busy', 'Another app or browser tab is using the camera. Close it and try again.', startCamera);
+    } else {
+      showError('Camera unavailable', `The camera could not be started${e && e.message ? ` (${e.message})` : ''}.`, startCamera);
+    }
+    setStatus(state.landmarker ? 'idle' : 'loading', state.landmarker ? `Camera off · ${state.delegate}` : 'Loading pose model…');
+    return;
+  }
+
+  const track = state.stream.getVideoTracks()[0];
+  const settings = track.getSettings ? track.getSettings() : {};
+  if (settings.facingMode) state.facing = settings.facingMode;
+  setMirror(state.facing !== 'environment');
+  track.addEventListener('ended', () => {
+    showError('Camera disconnected', 'The camera stopped sending video.', startCamera);
+    stopCamera(); $('startOverlay').hidden = true;
+  });
+
+  video.srcObject = state.stream;
+  await new Promise(res => video.readyState >= 1 ? res() : video.addEventListener('loadedmetadata', res, { once: true }));
+  try { await video.play(); } catch (e) { /* autoplay with muted should succeed */ }
+  syncCanvasSize();
+
+  $('startOverlay').hidden = true;
+  hud.hidden = false; $('hint').hidden = false; $('stopBtn').hidden = false;
+  updateFlipVisibility();
+  state.filter.reset();
+  state.running = true;
+  state.lastVideoTime = -1;
+  setStatus(state.landmarker ? 'live' : 'loading', state.landmarker ? `Live · ${state.delegate}` : 'Loading pose model…');
+  cancelAnimationFrame(state.raf);
+  state.raf = requestAnimationFrame(loop);
+}
+
+async function updateFlipVisibility() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    $('flipBtn').hidden = devices.filter(d => d.kind === 'videoinput').length < 2;
+  } catch (e) { $('flipBtn').hidden = true; }
+}
+
+function setMirror(on) {
+  state.mirror = on;
+  video.classList.toggle('mirrored', on);
+  $('mirrorBtn').setAttribute('aria-pressed', String(on));
+}
+
+function syncCanvasSize() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) return;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w; canvas.height = h;
+    stage.style.setProperty('--ar', (w / h).toFixed(4));
+  }
+}
+
+/* ---------- Main loop ---------- */
+function loop() {
+  if (!state.running) return;
+  state.raf = requestAnimationFrame(loop);
+  if (video.readyState < 2 || !state.landmarker) return;
+  if (video.currentTime === state.lastVideoTime) return;
+  state.lastVideoTime = video.currentTime;
+  syncCanvasSize();
+  const ts = performance.now();
+  let result;
+  try {
+    result = state.landmarker.detectForVideo(video, ts);
+  } catch (e) {
+    if (state.delegate === 'GPU') { state.running = false; fallbackToCpu(e).then(() => { state.running = true; state.raf = requestAnimationFrame(loop); }); }
+    else console.error(e);
+    return;
+  }
+  render(result && result.landmarks && result.landmarks[0], ts);
+}
+
+function setReadout(angle, message) {
+  if (angle == null) {
+    if (state.gate !== message) {
+      hudValue.textContent = message;
+      hudValue.classList.add('gated');
+      hudSub.textContent = message === 'Joint not visible' ? 'Hip, knee and ankle must be in view' : 'Step into the frame';
+      state.gate = message;
+    }
+    return;
+  }
+  if (state.gate) { hudValue.classList.remove('gated'); hudSub.textContent = 'Smoothed · 2D'; state.gate = ''; }
+  hudValue.innerHTML = `${Math.round(angle)}<span class="deg">°</span>`;
+}
+
+function render(pose, ts) {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!pose) { state.filter.reset(); setReadout(null, 'No person detected'); return; }
+
+  const [ia, ib, ic] = state.joint.points[state.side];
+  const lms = [pose[ia], pose[ib], pose[ic]];
+  const visible = lms.every(p => p && (p.visibility == null || p.visibility >= VIS_MIN));
+  const px = p => ({ x: (state.mirror ? 1 - p.x : p.x) * W, y: p.y * H });
+  const [A, B, C] = lms.map(px);
+  const unit = Math.max(2, H / 240);
+
+  drawLimb(A, B, C, unit, visible);
+  if (!visible) { state.filter.reset(); setReadout(null, 'Joint not visible'); return; }
+
+  const interior = interiorAngle(lms[0], lms[1], lms[2], W, H);
+  if (interior == null) { setReadout(null, 'Joint not visible'); return; }
+  const raw = state.joint.mode === 'flexion' ? 180 - interior : interior;
+  const angle = state.filter.filter(raw, ts);
+
+  drawArcAndLabel(A, B, C, angle, unit);
+  setReadout(angle);
+}
+
+/* ---------- Drawing ---------- */
+const COLORS = { bone: '#22d3ee', joint: '#ffffff', arc: '#a78bfa', dim: 'rgba(200,210,225,.55)' };
+
+function drawLimb(A, B, C, u, visible) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (visible) {
+    ctx.shadowColor = 'rgba(34,211,238,.6)';
+    ctx.shadowBlur = u * 6;
+  }
+  ctx.strokeStyle = visible ? COLORS.bone : COLORS.dim;
+  ctx.lineWidth = u * 3;
+  ctx.setLineDash(visible ? [] : [u * 5, u * 5]);
+  ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.lineTo(C.x, C.y); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.shadowBlur = 0;
+  for (const P of [A, B, C]) {
+    const r = P === B ? u * 5.5 : u * 4.5;
+    ctx.beginPath(); ctx.arc(P.x, P.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = visible ? COLORS.joint : COLORS.dim; ctx.fill();
+    ctx.lineWidth = u * 2; ctx.strokeStyle = visible ? COLORS.bone : 'rgba(0,0,0,.4)'; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawArcAndLabel(A, B, C, angle, u) {
+  const v1 = { x: A.x - B.x, y: A.y - B.y }, v2 = { x: C.x - B.x, y: C.y - B.y };
+  const l1 = Math.hypot(v1.x, v1.y), l2 = Math.hypot(v2.x, v2.y);
+  if (!l1 || !l2) return;
+  const r = Math.max(u * 10, Math.min(l1, l2) * 0.32);
+  const a1 = Math.atan2(v1.y, v1.x), a2 = Math.atan2(v2.y, v2.x);
+  let diff = a2 - a1;
+  while (diff > Math.PI) diff -= 2 * Math.PI;
+  while (diff < -Math.PI) diff += 2 * Math.PI;
+
+  ctx.save();
+  // Filled wedge + arc stroke showing the interior angle
+  ctx.beginPath(); ctx.moveTo(B.x, B.y); ctx.arc(B.x, B.y, r, a1, a1 + diff, diff < 0); ctx.closePath();
+  ctx.fillStyle = 'rgba(167,139,250,.18)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(B.x, B.y, r, a1, a1 + diff, diff < 0);
+  ctx.strokeStyle = COLORS.arc; ctx.lineWidth = u * 2.5; ctx.lineCap = 'round'; ctx.stroke();
+
+  // Label on the outside of the angle (opposite the bisector) so it doesn't cover the limb
+  const n1 = { x: v1.x / l1, y: v1.y / l1 }, n2 = { x: v2.x / l2, y: v2.y / l2 };
+  let bx = n1.x + n2.x, by = n1.y + n2.y;
+  let bl = Math.hypot(bx, by);
+  if (bl < 1e-3) { bx = -n1.y; by = n1.x; bl = 1; } // straight limb: use perpendicular
+  bx /= bl; by /= bl;
+  const text = `${Math.round(angle)}°`;
+  const fs = Math.round(Math.max(22, canvas.height * 0.07));
+  ctx.font = `800 ${fs}px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`;
+  const tw = ctx.measureText(text).width;
+  const padX = fs * 0.4, boxW = tw + padX * 2, boxH = fs * 1.35;
+  // Keep clear of the on-screen hint at the bottom of the stage
+  const hint = document.getElementById('hint');
+  const cr = canvas.getBoundingClientRect();
+  const scale = cr.height ? canvas.height / cr.height : 1;
+  const reserve = hint && !hint.hidden ? (cr.bottom - hint.getBoundingClientRect().top + 8) * scale : 6;
+  const minX = boxW / 2 + 6, maxX = canvas.width - boxW / 2 - 6;
+  const minY = boxH / 2 + 6, maxY = canvas.height - Math.max(6, reserve) - boxH / 2;
+  // Try positions around the joint; prefer the one furthest from both bones and inside the frame
+  const angDist = (a, b) => { let d = Math.abs(a - b) % (2 * Math.PI); return d > Math.PI ? 2 * Math.PI - d : d; };
+  const preferred = Math.atan2(-by, -bx);
+  let best = null;
+  for (let i = 0; i < 16; i++) {
+    const t = preferred + i * Math.PI / 8;
+    const dist = r + Math.abs(Math.cos(t)) * boxW / 2 + Math.abs(Math.sin(t)) * boxH / 2 + u * 6;
+    const px = B.x + Math.cos(t) * dist, py = B.y + Math.sin(t) * dist;
+    const qx = Math.min(maxX, Math.max(minX, px)), qy = Math.min(maxY, Math.max(minY, py));
+    const clampPenalty = Math.hypot(qx - px, qy - py) / (boxH);
+    const clear = Math.min(angDist(t, a1), angDist(t, a2));
+    const score = clear - clampPenalty - angDist(t, preferred) * 0.15;
+    if (!best || score > best.score) best = { score, x: qx, y: qy };
+  }
+  const cx = best.x, cy = best.y;
+  roundRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH, boxH / 2.6);
+  ctx.fillStyle = 'rgba(5,10,20,.72)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(34,211,238,.7)'; ctx.lineWidth = Math.max(1.5, u); ctx.stroke();
+  ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, cx, cy + fs * 0.04);
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/* ---------- Wiring ---------- */
+$('startBtn').addEventListener('click', startCamera);
+$('stopBtn').addEventListener('click', stopCamera);
+$('mirrorBtn').addEventListener('click', () => setMirror(!state.mirror));
+$('flipBtn').addEventListener('click', () => { state.facing = state.facing === 'user' ? 'environment' : 'user'; startCamera(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { cancelAnimationFrame(state.raf); }
+  else if (state.running) { state.raf = requestAnimationFrame(loop); }
+});
+
+loadModel();
+</script>
+</body>
+</html>
